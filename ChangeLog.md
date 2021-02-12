@@ -1,3 +1,3 @@
-# Changelog for discord-unknown-spell
+# Changelog for discord-unknown-spells
 
 ## Unreleased changes

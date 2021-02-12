@@ -1,6 +1,6 @@
-name:                discord-unknown-spell
+name:                discord-unknown-spells
 version:             0.1.0.0
-github:              "githubuser/discord-unknown-spell"
+github:              "githubuser/discord-unknown-spells"
 license:             BSD3
 author:              "Author name here"
 maintainer:          "example@example.com"
@@ -17,16 +17,30 @@ extra-source-files:
 # To avoid duplicated efforts in documentation and dealing with the
 # complications of embedding Haddock markup inside cabal files, it is
 # common to point users to the README.md file.
-description:         Please see the README on GitHub at <https://github.com/githubuser/discord-unknown-spell#readme>
+description:         Please see the README on GitHub at <https://github.com/githubuser/discord-unknown-spells#readme>
 
 dependencies:
 - base >= 4.7 && < 5
+- discord-haskell
+- text
+- mtl
+- transformers
+- safe
+- aeson
+- bytestring
+- cryptonite
+- unliftio
+- memory
+- time
+- containers
+- double-conversion
+- either
 
 library:
   source-dirs: src
 
 executables:
-  discord-unknown-spell-exe:
+  discord-unknown-spells-exe:
     main:                Main.hs
     source-dirs:         app
     ghc-options:
@@ -34,10 +48,10 @@ executables:
     - -rtsopts
     - -with-rtsopts=-N
     dependencies:
-    - discord-unknown-spell
+    - discord-unknown-spells
 
 tests:
-  discord-unknown-spell-test:
+  discord-unknown-spells-test:
     main:                Spec.hs
     source-dirs:         test
     ghc-options:
@@ -45,4 +59,4 @@ tests:
     - -rtsopts
     - -with-rtsopts=-N
     dependencies:
-    - discord-unknown-spell
+    - discord-unknown-spells

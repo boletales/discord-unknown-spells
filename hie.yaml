@@ -1,0 +1,13 @@
+cradle:
+  stack:
+    - path: "./src"
+      component: "discord-unknown-spells:lib"
+
+    - path: "./app/Main.hs"
+      component: "discord-unknown-spells:exe:discord-unknown-spells-exe"
+
+    - path: "./app/Paths_discord_unknown_spells.hs"
+      component: "discord-unknown-spells:exe:discord-unknown-spells-exe"
+
+    - path: "./test"
+      component: "discord-unknown-spells:test:discord-unknown-spells-test"
