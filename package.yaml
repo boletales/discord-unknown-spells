@@ -35,6 +35,7 @@ dependencies:
 - containers
 - double-conversion
 - either
+- directory
 
 library:
   source-dirs: src

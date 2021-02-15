@@ -4,7 +4,7 @@ cabal-version: 1.12
 --
 -- see: https://github.com/sol/hpack
 --
--- hash: c9d8d5e4527db08fa3ca997a8829de237755a1ac2b6f86aad62a872e0d2818de
+-- hash: d3b398dc6a0b6edb2706f7ce45f5a3f2a2489142ea2d7bf2c3880a6c2ca5ac04
 
 name:           discord-unknown-spells
 version:        0.1.0.0
@@ -38,6 +38,7 @@ library
     , bytestring
     , containers
     , cryptonite
+    , directory
     , discord-haskell
     , double-conversion
     , either
@@ -63,6 +64,7 @@ executable discord-unknown-spells-exe
     , bytestring
     , containers
     , cryptonite
+    , directory
     , discord-haskell
     , discord-unknown-spells
     , double-conversion
@@ -90,6 +92,7 @@ test-suite discord-unknown-spells-test
     , bytestring
     , containers
     , cryptonite
+    , directory
     , discord-haskell
     , discord-unknown-spells
     , double-conversion

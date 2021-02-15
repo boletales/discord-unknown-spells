@@ -1,9 +1,13 @@
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE TupleSections #-}
 {-# LANGUAGE DeriveGeneric #-}
+{-# LANGUAGE LambdaCase #-}
 
 module Lib where
 
+import Control.Monad.IO.Class
+
+import System.Directory
 import Data.List as L
 import Crypto.Hash 
 import Crypto.Hash.Algorithms
@@ -34,29 +38,38 @@ import Data.Double.Conversion.Text
 -}
 
 data Settings = Settings {
-        pepper       :: T.Text,
-        manaStart    :: Int,
-        hpStart      :: Int,
-        buffPow      :: Double,
-        damagePow    :: Double,
-        damageMag    :: Double,
-        healPow      :: Double,
-        healMag      :: Double,
-        buffLifeSpan :: Double
+        prefix        :: T.Text,
+        spellsplitter :: T.Text,
+        pepper        :: T.Text,
+        manaStart     :: Int,
+        hpStart       :: Int,
+        manaRegenMin  :: Double,
+        buffPow       :: Double,
+        damagePow     :: Double,
+        damageMag     :: Double,
+        healPow       :: Double,
+        healMag       :: Double,
+        costMag       :: Double,
+        buffLifeSpan  :: Double
     } deriving (Show, Generic)
 
 instance FromJSON Settings
 instance ToJSON   Settings
 
+
 defaultSettings = Settings {
+        prefix        = "%m",
+        spellsplitter = "!",
         pepper        = "",
-        hpStart       = 300,
-        manaStart     = 300,
+        hpStart       = 400,
+        manaStart     = 400,
+        manaRegenMin  = 200,
         buffPow       = 2,
         damagePow     = 4,
         damageMag     = 50,
         healPow       = 4,
         healMag       = 50,
+        costMag       = 50,
         buffLifeSpan  = 120
     }
 
@@ -71,7 +84,7 @@ data MagicEnv = MagicEnv {
 settingsToEnv :: Settings -> IO MagicEnv
 settingsToEnv s = MagicEnv s <$> getPOSIXTime
 
-data SpellResult = ManaConsumed Int | ManaRestored Int | Damaged Int | Healed Int | Buffed BuffType Double
+data SpellResult = ManaConsumed Int | ManaRestored Int | Damaged Int | Healed Int | Buffed BuffType Double deriving (Show, Eq)
 
 data BuffType  = StAttack | StDefense
                     deriving (Show, Eq, Enum)
@@ -92,6 +105,15 @@ data Player = Player {
         imData :: ImData,
         lastLoaded   :: POSIXTime 
     } deriving (Show, Eq)
+
+emptyPlayer = Player {
+        hp   = 0,
+        mana = 0,
+        name = "",
+        buff = [],
+        imData = imDataDefault,
+        lastLoaded = secondsToNominalDiffTime 0
+    }
 
 data ImData = ImData {
         totalDeath       :: Int,
@@ -160,36 +182,38 @@ getSpell str p = flip execHashReader (TE.encodeUtf8 $ p `T.append` str) $ do
 intToPowDouble :: Double -> Int -> Double
 intToPowDouble mag int = mag ** (fromIntegral int / (2^32) - 0.5)
 
+calcBuff env spell source target = intToPowDouble (buffPow $ settings env) (power spell)
 
-calcBuffMag env buffType player = 
+calcBuffTotal env buffType player = 
     (L.product
-        $ L.map    (\(bt, po, pt, ag, ls) -> po * (1- ag/ls) ) 
+        $ L.map    (\(bt, po, pt, ag, ls) -> po ** (1- ag/ls) ) 
         $ L.filter (\(bt, po, pt, ag, ls) -> bt == buffType && ag < ls ) 
-        $ L.map    (\(bt, po, pt) -> (bt, po, pt, realToFrac (10^12 * nominalDiffTimeToSeconds (time env - pt)), buffLifeSpan (settings env)) )
+        $ L.map    (\(bt, po, pt) -> (bt, po, pt, realToFrac (nominalDiffTimeToSeconds (time env - pt)), buffLifeSpan (settings env)) )
         $ buff player)
 
 calcDamage :: MagicEnv -> SpellData -> Player -> Player -> Int
 calcDamage env spell source target = 
-    let saBuff = calcBuffMag env StAttack  source
-        tdBuff = calcBuffMag env StDefense target
+    let saBuff = calcBuffTotal env StAttack  source
+        tdBuff = calcBuffTotal env StDefense target
         baseDamage = (damageMag $ settings env) * intToPowDouble (damagePow $ settings env) (power spell)
     in double2Int $ baseDamage * saBuff / tdBuff
 
 calcHeal env spell source target = 
-    let saBuff = calcBuffMag env StAttack  source
-        tdBuff = calcBuffMag env StDefense target
+    let saBuff = calcBuffTotal env StAttack  source
+        tdBuff = calcBuffTotal env StDefense target
         baseDamage = (damageMag $ settings env) * intToPowDouble (damagePow $ settings env) (power spell)
     in double2Int $ baseDamage * saBuff
 
-calcCost spell = double2Int $ intToPowDouble 6 (power spell) * 
+calcCost spell ss = double2Int $ intToPowDouble 6 (power spell) * 
                                 case spelltype spell of
-                                    Attack -> 30
-                                    Heal   -> 50
-                                    Buff t -> 50
+                                    Attack -> costMag ss * 1.0
+                                    Heal   -> costMag ss * 1.0
+                                    Buff t -> costMag ss * 1.0
 
-castSideEff env player = player{ imData = let d = imData player in d{totalCast = totalCast d + 1}}
 
-consumeMana env cost player = player{mana   = mana player - cost,
+castSideEff env cost player = player{ imData = let d = imData player in d{totalCast = totalCast d + 1, totalMana = totalMana d + cost}}
+
+consumeMana env cost player = player{mana   = max 0 $ mana player - cost,
                                      imData = let d = imData player in d{totalMana = totalMana d + cost}}
 
 dealDamage env damageam player = player{ hp     = hp player - damageam,
@@ -200,36 +224,72 @@ dealAttack env damageam player = player{ imData = let d = imData player in d {to
 dealHeal env healam player = player{ hp = min (hpStart $ settings env) (hp player + healam)}
 dealBuff env t buffam player = player{ buff = (t, buffam, time env) : buff player }
                                      
-tryCast env spell source target = 
-    let cost = calcCost spell
-        paid = castSideEff env $ consumeMana env cost source
-        s = settings env
-    in  (\((p1,p2),r) -> ((checkLife s source p1,checkLife s target p2),r)) <$>
-        if mana source < cost
-        then Nothing
-        else case spelltype spell of
-                Attack -> Just (let damageam = calcDamage env spell source target in ((dealAttack env damageam paid, dealDamage env damageam target), ([ManaConsumed cost], [Damaged damageam])))
-                Heal   -> Just (let healam   = calcHeal   env spell source target in ((paid, dealHeal env healam target), ([ManaConsumed cost], [Healed  healam  ])))
-                Buff t -> Just (let buffam   = buffPow (settings env) ** fromIntegral (power spell) in ((paid, dealBuff env t buffam target), ([ManaConsumed cost], [Buffed t buffam])))
+tryCast :: MagicEnv -> SpellData -> T.Text -> T.Text -> Map T.Text Player -> Maybe (Map T.Text Player, [(T.Text , SpellResult)])
+tryCast env spell sourceid targetid players = do
+    source <- players !? sourceid
+    let s = settings env
+    let cost = calcCost spell s
+    if mana source < cost
+    then Nothing
+    else Just ()
+    let castedpls = M.adjust (castSideEff env cost) sourceid players
+    target <- players !? targetid
+    case spelltype spell of
+        Attack -> Just (let damageam = calcDamage env spell source target
+                        in ( M.adjust   (dealAttack env damageam) sourceid
+                             $ M.adjust (dealDamage env damageam) targetid
+                             $ M.adjust (consumeMana env cost) sourceid
+                             $ castedpls
+                            , [(sourceid ,ManaConsumed cost), (targetid, Damaged damageam)]))
 
+        Heal   -> Just (let healam   = calcHeal   env spell source target
+                        in ( M.adjust (consumeMana env cost) sourceid
+                             $ M.adjust (dealHeal env healam) targetid
+                             $ castedpls
+                            , [(sourceid ,ManaConsumed cost), (targetid, Healed healam)]))
+
+        Buff t -> Just (let buffam   = calcBuff env spell source target
+                        in ( M.adjust (consumeMana env cost) sourceid
+                             $ M.adjust (dealBuff env t buffam) targetid
+                             $ castedpls
+                            , [(sourceid ,ManaConsumed cost), (targetid, Buffed t buffam)]))
+
+doCast :: MagicEnv -> Text -> Text -> Text -> Map Text Player -> (Map Text Player, [Text])
 doCast env spellstr sourceid targetid players =
     let source = players !? sourceid
         target = players !? targetid
         spell  = getSpell spellstr (pepper $ settings env)
-        mr     = join $ tryCast env spell <$> source <*> target
+        mr     = tryCast env spell sourceid targetid players
     in case mr of
-        Nothing -> (players, ["詠唱失敗……"])
-        Just ((ns,nt),(lrs,lrt)) ->  (M.insert sourceid ns $ M.insert targetid nt players , join [spellResultToText ns lrs ,spellResultToText nt lrt])
-        
-spellResultToText p results =
-    L.map (name p `T.append` ": " `T.append`)
-    $ join $ L.map 
-        (\r ->  case r of
-                    ManaConsumed am -> [T.pack (show am) `T.append` "マナ消費"]
-                    ManaRestored am -> [T.pack (show am) `T.append` "マナ回復"]
-                    Damaged      am -> [T.pack (show am) `T.append` "ダメージ!"]
-                    Healed       am -> [T.pack (show am) `T.append` "回復!"]
-                    Buffed    bt am -> [buffTypeToText bt `T.append` "が一時的に" `T.append` toFixed (-2) am `T.append` "倍になった!"]) results
+        Nothing -> (players, ["詠唱失敗…… " `T.append`  maybe "" (\p -> manaBar (manaMax (settings env) p) (mana p)) source ])
+        Just (pls, rs) ->  (pls , spellResultToText (settings env) rs pls)
+
+clip mn mx x = max mn (min mx x)
+
+--"🌕🌖🌗🌘🌑"
+--"❤️💔🖤"
+phasedProgressBar length phase max now = 
+    let pl  = L.length phase -1
+        i   = truncate (clip 0.0 1.0 (fromIntegral now/fromIntegral max)*fromIntegral (length*pl))
+        bar = L.take length $ L.replicate (i `div` pl) (L.head phase) ++ [phase !! (pl - i `mod` pl)] ++ L.replicate (length - i `div` pl) (L.last phase)
+     in T.pack $ show now ++ "/" ++ show max ++ " " ++ bar
+
+manaBar = phasedProgressBar 10 "🌕🌖🌗🌘🌑"
+hpBar = phasedProgressBar 10 "❤️💔🖤"
+
+spellResultToText :: Ord k => Settings -> [(k, SpellResult)] -> Map k Player -> [Text]
+spellResultToText s results players =
+    join $ L.map 
+        (\(pid, r) -> 
+            case players !? pid of
+              Nothing -> []
+              Just p  -> case r of
+                ManaConsumed am -> [name p `T.append` ": " `T.append` T.pack (show am)  `T.append` "マナ消費 "  `T.append` manaBar (manaMax s p) (mana p)]
+                ManaRestored am -> [name p `T.append` ": " `T.append` T.pack (show am)  `T.append` "マナ回復 "  `T.append` manaBar (manaMax s p) (mana p)]
+                Damaged      am -> [name p `T.append` "に" `T.append` T.pack (show am)  `T.append` "ダメージ! " `T.append` hpBar (hpMax s p) (hp p)]
+                Healed       am -> [name p `T.append` ": " `T.append` T.pack (show am)  `T.append` "回復! "     `T.append` hpBar (hpMax s p) (hp p)]
+                Buffed    bt am -> [name p `T.append` "の" `T.append` buffTypeToText bt `T.append` "が一時的に" `T.append` toFixed 2 am `T.append` "倍になった!"]
+                x  -> [T.pack $ show x]) results
 
 buffTypeToText bt =
     case bt of
@@ -251,13 +311,13 @@ toDefault settings player = player{
         buff = []
     }
 
-brandNewPlayer settings = (toDefault settings Player{}){
+brandNewPlayer settings = (toDefault settings emptyPlayer){
         imData = imDataDefault
     }
 
 loadFromJsonObj :: Settings -> Value -> Player
 loadFromJsonObj settings obj = 
-    (toDefault settings Player{}){
+    (toDefault settings emptyPlayer){
         imData = fromMaybe imDataDefault $ parseMaybe parseJSON obj
     }
 
@@ -269,23 +329,41 @@ completePlayerData settings ids names pmap = L.foldl' (\m (i, n) -> case m !? i 
                                                                         Just p  -> M.insert i (p{name = n}) m
                                                                         Nothing -> M.insert i (brandNewPlayer settings){name = n} m) pmap (L.zip ids names)
 
+dealTimeRelatedEff :: Settings -> POSIXTime -> Player -> Player
+dealTimeRelatedEff s n p = let t       = realToFrac $ n - lastLoaded p
+                               newmana = min (manaMax s p) (mana p + floor (t * manaRegenMin s /60))
+                            in p{lastLoaded = n, mana = newmana}
+
+decodeFileStrictIfExist :: FromJSON a => FilePath -> IO (Maybe a)
+decodeFileStrictIfExist path = do
+    e <- doesFileExist path
+    if e then decodeFileStrict path else return Nothing
+
 saveGameData :: T.Text -> Map T.Text Player -> Settings -> IO ()
 saveGameData serverid players settings = TLIO.writeFile ("data_"++T.unpack serverid++".json") (encodeToLazyText $ object [ "settings" .= settings, "players" .= M.map imData players])
 
-loadGameData :: T.Text -> [T.Text] -> [T.Text] -> IO (Map T.Text Player, MagicEnv)
-loadGameData serverid pids names = do
-    obj <- decodeFileStrict ("data_"++T.unpack serverid++".json") :: IO (Maybe Object)
-    let settings = fromMaybe defaultSettings $ join $ parseMaybe (.:? "settings") =<< obj
-    let players  = completePlayerData settings pids names
+loadGameData :: T.Text -> [T.Text] -> [T.Text] -> Settings -> IO (Map T.Text Player, MagicEnv)
+loadGameData serverid pids names settings = do
+    obj <- decodeFileStrictIfExist ("data_"++T.unpack serverid++".json") :: IO (Maybe Object)
+    now <- getPOSIXTime
+    let players  = M.map (\p->p{lastLoaded = now}) 
+                    $ completePlayerData settings pids names
                     $ M.map (loadFromJsonObj settings)
                     $ fromMaybe (M.empty :: M.Map T.Text Value) $ join $ parseMaybe (.:? "players") =<< obj
     env <- settingsToEnv settings
     return (players, env)
 
-withTimeElapsed :: String -> IO a -> IO a
+reLoadGameData :: T.Text -> [T.Text] -> [T.Text] -> Settings -> Map T.Text Player -> IO (Map T.Text Player, MagicEnv)
+reLoadGameData serverid pids names settings pls= do
+    now <- getPOSIXTime
+    let players  = completePlayerData settings pids names (M.map (dealTimeRelatedEff settings now) pls)
+    env <- settingsToEnv settings
+    return (players, env)
+
+withTimeElapsed :: (MonadIO m) => String -> m a -> m a
 withTimeElapsed t f = do
-    start <- getPOSIXTime
+    start <- liftIO getPOSIXTime
     r <- f
-    end <- getPOSIXTime
-    Prelude.putStrLn $ t++": "++show (end-start)
+    end <- liftIO getPOSIXTime
+    liftIO $ Prelude.putStrLn $ t++": "++show (end-start)
     return r
