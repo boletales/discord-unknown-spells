@@ -39,9 +39,9 @@ extra-deps:
 - emoji-0.1.0.2
 
 # Override default flag values for local packages and extra-deps
-flags:
-  aeson:
-    fast: true
+# flags:
+#   aeson:
+#     fast: true
 
 # Extra package databases containing global packages
 # extra-package-dbs: []
