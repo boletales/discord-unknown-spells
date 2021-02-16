@@ -32,21 +32,7 @@ import Data.Aeson.Text
 import Data.Either.Combinators
 import Data.Time.Clock.POSIX
 import Data.Time.Clock
-
-data GeneralSettings = GeneralSettings{
-                            token  :: T.Text,
-                            status :: T.Text
-                        } deriving (Show, Generic)
-instance FromJSON GeneralSettings
-instance ToJSON   GeneralSettings
-
-defaultGeneralSettings = GeneralSettings{
-        token  = "your bot token here",
-        status = ""
-    }
-
-saveGeneralSettings :: T.Text -> GeneralSettings -> IO ()
-saveGeneralSettings serverid settings = TLIO.writeFile "settings.json" (encodeToLazyText settings)
+import System.Environment
 
 getServerSettingsPath :: T.Text -> FilePath
 getServerSettingsPath serverid = "settings_"++T.unpack serverid++".json"
@@ -72,15 +58,15 @@ tryReloadGameData serverid pids names settings plsmap =
 
 main :: IO ()
 main = do
-    esettings <- decodeFileStrictIfExist "settings.json"
     mref <- newIORef M.empty
     pref <- newIORef M.empty
-    case esettings of
-        Just settings -> do
+    mtoken <- lookupEnv "DISCORD_UNKNOWN_SPELLS_TOKEN"
+    case mtoken of
+        Just token -> do
             putStrLn "working"
-            TIO.putStrLn =<< (runDiscord $ def { discordToken   = token settings
+            TIO.putStrLn =<< (runDiscord $ def { discordToken   = T.pack token
                                                , discordOnEvent = \ev -> catchAny (eventHandler mref pref ev) (\e -> liftIO $ print e)})
-        Nothing -> putStrLn "error on loading settings.json"
+        Nothing -> putStrLn "env var DISCORD_UNKNOWN_SPELLS_TOKEN is not set."
 
 eventHandler :: IORef(Map T.Text (MVar())) -> IORef(Map T.Text (Map T.Text Player)) -> Event -> DiscordHandler ()
 eventHandler mref pref event = 
