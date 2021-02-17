@@ -7,6 +7,8 @@ module Main where
 
 import Lib
 
+import System.Directory
+
 import UnliftIO.Concurrent
 import UnliftIO.Exception
 import Control.Monad
@@ -36,14 +38,14 @@ import System.Environment
 import Safe
 
 getServerSettingsPath :: T.Text -> FilePath
-getServerSettingsPath serverid = "settings_"++T.unpack serverid++".json"
+getServerSettingsPath serverid = datadir ++ "settings_"++T.unpack serverid++".json"
 
 saveServerSettings :: T.Text -> Settings -> IO ()
 saveServerSettings serverid settings = TLIO.writeFile ("settings_"++T.unpack serverid++".json") (encodeToLazyText settings)
 
 loadServerSettings :: T.Text -> IO Settings
 loadServerSettings serverid = do
-    msettings <- decodeFileStrictIfExist ("loading "++getServerSettingsPath serverid)
+    msettings <- decodeFileStrictIfExist (getServerSettingsPath serverid)
     case msettings of
         Nothing -> saveServerSettings serverid defaultSettings
         _       -> return ()
@@ -59,6 +61,8 @@ tryReloadGameData serverid pids names settings plsmap =
 
 main :: IO ()
 main = do
+    doesDatadirExist <- doesDirectoryExist datadir
+    unless doesDatadirExist (createDirectory datadir)
     mref <- newIORef M.empty
     pref <- newIORef M.empty
     mtoken <- lookupEnv "DISCORD_UNKNOWN_SPELLS_TOKEN"

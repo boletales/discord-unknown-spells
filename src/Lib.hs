@@ -355,12 +355,17 @@ decodeFileStrictIfExist path = do
     e <- doesFileExist path
     if e then decodeFileStrict path else return Nothing
 
+datadir = "savedata/"
+
+getServerDataPath :: T.Text -> FilePath
+getServerDataPath serverid = datadir ++ "data_"++T.unpack serverid++".json"
+
 saveGameData :: T.Text -> Map T.Text Player -> Settings -> IO ()
-saveGameData serverid players settings = TLIO.writeFile ("data_"++T.unpack serverid++".json") (encodeToLazyText $ object [ "settings" .= settings, "players" .= M.map imData players])
+saveGameData serverid players settings = TLIO.writeFile (getServerDataPath serverid) (encodeToLazyText $ object [ "settings" .= settings, "players" .= M.map imData players])
 
 loadGameData :: T.Text -> [T.Text] -> [T.Text] -> Settings -> IO (Map T.Text Player, MagicEnv)
 loadGameData serverid pids names settings = do
-    obj <- decodeFileStrictIfExist ("data_"++T.unpack serverid++".json") :: IO (Maybe Object)
+    obj <- decodeFileStrictIfExist (getServerDataPath serverid) :: IO (Maybe Object)
     now <- getPOSIXTime
     let players  = M.map (\p->p{lastLoaded = now}) 
                     $ completePlayerData settings pids names
