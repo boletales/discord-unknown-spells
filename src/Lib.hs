@@ -63,7 +63,7 @@ defaultSettings = Settings {
         pepper        = "",
         hpStart       = 400,
         manaStart     = 400,
-        manaRegenMin  = 200,
+        manaRegenMin  = 60,
         buffPow       = 2,
         damagePow     = 4,
         damageMag     = 50,
@@ -84,7 +84,7 @@ data MagicEnv = MagicEnv {
 settingsToEnv :: Settings -> IO MagicEnv
 settingsToEnv s = MagicEnv s <$> getPOSIXTime
 
-data SpellResult = ManaConsumed Int | ManaRestored Int | Damaged Int | Healed Int | Buffed BuffType Double deriving (Show, Eq)
+data SpellResult = Casted T.Text  | ManaConsumed Int | ManaRestored Int | Damaged Int | Healed Int | Buffed BuffType Double deriving (Show, Eq)
 
 data BuffType  = StAttack | StDefense
                     deriving (Show, Eq, Enum)
@@ -93,6 +93,7 @@ data SpellType = Attack | Heal | Buff BuffType
                     deriving (Show, Eq)
 
 data SpellData = SpellData {
+        spellstr  :: T.Text,
         spelltype :: SpellType,
         power     :: Int
     } deriving (Show, Eq)
@@ -102,8 +103,10 @@ data Player = Player {
         mana :: Int,
         name :: T.Text,
         buff :: [(BuffType, Double, POSIXTime)],
-        imData :: ImData,
-        lastLoaded   :: POSIXTime 
+        imData     :: ImData,
+        targetLog  :: [T.Text],
+        spellLog   :: [T.Text],
+        lastLoaded :: POSIXTime 
     } deriving (Show, Eq)
 
 emptyPlayer = Player {
@@ -111,7 +114,9 @@ emptyPlayer = Player {
         mana = 0,
         name = "",
         buff = [],
-        imData = imDataDefault,
+        targetLog  = [],
+        spellLog   = [],
+        imData     = imDataDefault,
         lastLoaded = secondsToNominalDiffTime 0
     }
 
@@ -175,6 +180,7 @@ getSpell str p = flip execHashReader (TE.encodeUtf8 $ p `T.append` str) $ do
     pw <- askInt
 
     return SpellData {
+                spellstr  = str,
                 spelltype = st,
                 power     = pw
             }
@@ -223,6 +229,7 @@ dealAttack env damageam player = player{ imData = let d = imData player in d {to
 
 dealHeal env healam player = player{ hp = min (hpStart $ settings env) (hp player + healam)}
 dealBuff env t buffam player = player{ buff = (t, buffam, time env) : buff player }
+setLog spell target player = player{ spellLog = spell : spellLog player, targetLog = target : targetLog player}
                                      
 tryCast :: MagicEnv -> SpellData -> T.Text -> T.Text -> Map T.Text Player -> Maybe (Map T.Text Player, [(T.Text , SpellResult)])
 tryCast env spell sourceid targetid players = do
@@ -234,7 +241,7 @@ tryCast env spell sourceid targetid players = do
     else Just ()
     let castedpls = M.adjust (castSideEff env cost) sourceid players
     target <- players !? targetid
-    case spelltype spell of
+    (m,r) <- case spelltype spell of
         Attack -> Just (let damageam = calcDamage env spell source target
                         in ( M.adjust   (dealAttack env damageam) sourceid
                              $ M.adjust (dealDamage env damageam) targetid
@@ -253,6 +260,7 @@ tryCast env spell sourceid targetid players = do
                              $ M.adjust (dealBuff env t buffam) targetid
                              $ castedpls
                             , [(sourceid ,ManaConsumed cost), (targetid, Buffed t buffam)]))
+    return (m, (sourceid, Casted $ spellstr spell) : r)
 
 doCast :: MagicEnv -> Text -> Text -> Text -> Map Text Player -> (Map Text Player, [Text])
 doCast env spellstr sourceid targetid players =
@@ -261,8 +269,15 @@ doCast env spellstr sourceid targetid players =
         spell  = getSpell spellstr (pepper $ settings env)
         mr     = tryCast env spell sourceid targetid players
     in case mr of
-        Nothing -> (players, ["詠唱失敗…… " `T.append`  maybe "" (\p -> manaBar (manaMax (settings env) p) (mana p)) source ])
-        Just (pls, rs) ->  (pls , spellResultToText (settings env) rs pls)
+        Nothing -> (players, ["詠唱失敗…… " `T.append`  maybe "" (manaBar (settings env)) source ])
+        Just (pls, rs) ->  (M.adjust (setLog spellstr targetid) sourceid pls , spellResultToText (settings env) rs pls)
+
+statusText :: MagicEnv -> M.Map T.Text Player -> T.Text -> [T.Text]
+statusText env players tid = maybe ["取得失敗: 該当するプレイヤーが存在しません"] (\p -> 
+    [name p `T.append` " (" `T.append` "攻撃力: " `T.append` (toFixed 2 $ calcBuffTotal env StAttack p) `T.append` "x, " `T.append` "防御力: " `T.append` (toFixed 2 $ calcBuffTotal env StDefense p) `T.append` "x" `T.append` ")"
+   , "mana: " `T.append` manaBar (settings env) p
+   , "hp: " `T.append` hpBar (settings env) p
+   ]) (players !? tid)
 
 clip mn mx x = max mn (min mx x)
 
@@ -274,8 +289,8 @@ phasedProgressBar length phase max now =
         bar = L.take length $ L.replicate (i `div` pl) (L.head phase) ++ [phase !! (pl - i `mod` pl)] ++ L.replicate (length - i `div` pl) (L.last phase)
      in T.pack $ show now ++ "/" ++ show max ++ " " ++ bar
 
-manaBar = phasedProgressBar 10 "🌕🌖🌗🌘🌑"
-hpBar = phasedProgressBar 10 "❤️💔🖤"
+manaBar s p = phasedProgressBar 10 "🌕🌖🌗🌘🌑" (manaMax s p) (mana p)
+hpBar s p   = phasedProgressBar 10 "❤️💔🖤" (hpMax s p) (hp p)
 
 spellResultToText :: Ord k => Settings -> [(k, SpellResult)] -> Map k Player -> [Text]
 spellResultToText s results players =
@@ -284,10 +299,11 @@ spellResultToText s results players =
             case players !? pid of
               Nothing -> []
               Just p  -> case r of
-                ManaConsumed am -> [name p `T.append` ": " `T.append` T.pack (show am)  `T.append` "マナ消費 "  `T.append` manaBar (manaMax s p) (mana p)]
-                ManaRestored am -> [name p `T.append` ": " `T.append` T.pack (show am)  `T.append` "マナ回復 "  `T.append` manaBar (manaMax s p) (mana p)]
-                Damaged      am -> [name p `T.append` "に" `T.append` T.pack (show am)  `T.append` "ダメージ! " `T.append` hpBar (hpMax s p) (hp p)]
-                Healed       am -> [name p `T.append` ": " `T.append` T.pack (show am)  `T.append` "回復! "     `T.append` hpBar (hpMax s p) (hp p)]
+                Casted      str -> [name p `T.append` "の" `T.append` str  `T.append` "!"]
+                ManaConsumed am -> [name p `T.append` ": " `T.append` T.pack (show am)  `T.append` "マナ消費 \n"  `T.append` manaBar s p]
+                ManaRestored am -> [name p `T.append` ": " `T.append` T.pack (show am)  `T.append` "マナ回復 \n"  `T.append` manaBar s p]
+                Damaged      am -> [name p `T.append` "に" `T.append` T.pack (show am)  `T.append` "ダメージ! \n" `T.append` hpBar s p]
+                Healed       am -> [name p `T.append` ": " `T.append` T.pack (show am)  `T.append` "回復! \n"     `T.append` hpBar s p]
                 Buffed    bt am -> [name p `T.append` "の" `T.append` buffTypeToText bt `T.append` "が一時的に" `T.append` toFixed 2 am `T.append` "倍になった!"]
                 x  -> [T.pack $ show x]) results
 
