@@ -127,7 +127,8 @@ handleCommand ss mref pref gid sid t = do
 
     case T.head t of
         'c' -> handleCast   ss mref pref gid sid t
-        's' -> handleStatus ss mref pref gid sid t
+        's' -> handleStatus False ss mref pref gid sid t
+        'S' -> handleStatus True  ss mref pref gid sid t
 
         _   -> hE $ Left ["詠唱失敗: 無効なコマンドです"]
 
@@ -198,7 +199,7 @@ handleCast ss mref pref gid sid t = do
             liftIO $ Prelude.putStrLn $ "internal total: "++show (end-start)
             hE $ Left (logs ++ reviveLog)
 
-handleStatus ss mref pref gid sid t = do
+handleStatus detail ss mref pref gid sid t = do
     let gidt = serveridWithText gid
     let sidt = useridWithText sid
     let rawtarget = T.strip $ T.tail t
@@ -222,10 +223,11 @@ handleStatus ss mref pref gid sid t = do
                                     p:q:_ -> hE $ Left ["詠唱失敗: 該当するプレイヤーが複数存在します"] 
                                     [p]   -> hE $ Right $ fst p
 
-            let result = statusText env players tidt 
+            let result = if detail then statusTextDetails env players tidt else statusText env players tidt 
             end <- liftIO getPOSIXTime
             liftIO $ Prelude.putStrLn $ "internal total: "++show (end-start)
             hE $ Left result
+
 serveridWithText gid = T.pack ("s"++show gid) 
 useridWithText uid = T.pack ("u"++show uid)
 

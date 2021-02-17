@@ -282,6 +282,14 @@ statusText env players tid = maybe ["取得失敗: 該当するプレイヤー�
    , "hp: " `T.append` hpBar (settings env) p
    ]) (players !? tid)
 
+statusTextDetails :: MagicEnv -> M.Map T.Text Player -> T.Text -> [T.Text]
+statusTextDetails env players tid = maybe ["取得失敗: 該当するプレイヤーが存在しません"] (\p -> 
+    [name p `T.append` " (" `T.append` "攻撃力: " `T.append` (toFixed 2 $ calcBuffTotal env StAttack p) `T.append` "x, " `T.append` "防御力: " `T.append` (toFixed 2 $ calcBuffTotal env StDefense p) `T.append` "x" `T.append` ")"
+   , "与ダメ合計: " `T.append` (T.pack $ show $ totalDamageGiven $ imData p) `T.append` "," `T.append` "被ダメ合計: " `T.append` (T.pack $ show $ totalDamageTaken $ imData p) `T.append` "," `T.append` "消費マナ合計: " `T.append` (T.pack $ show $ totalMana $ imData p)
+   , "mana: " `T.append` manaBar (settings env) p
+   , "hp: " `T.append` hpBar (settings env) p
+   ]) (players !? tid)
+
 clip mn mx x = max mn (min mx x)
 
 --"🌕🌖🌗🌘🌑"
