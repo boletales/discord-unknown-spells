@@ -1,4 +1,5 @@
 FROM prebuild1 as builder
+COPY . /root/work
 RUN cd /root/work && stack install
 
 FROM debian:stable-slim
