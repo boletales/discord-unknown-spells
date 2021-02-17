@@ -1,0 +1,1 @@
+docker build -t gcr.io/web-test-okikaze103/discord_unknown_spells -f Dockerfile .

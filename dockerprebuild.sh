@@ -1,0 +1,1 @@
+docker build -t prebuild1 -f prebuild.Dockerfile .
