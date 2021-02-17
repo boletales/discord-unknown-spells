@@ -41,7 +41,7 @@ getServerSettingsPath :: T.Text -> FilePath
 getServerSettingsPath serverid = datadir ++ "settings_"++T.unpack serverid++".json"
 
 saveServerSettings :: T.Text -> Settings -> IO ()
-saveServerSettings serverid settings = TLIO.writeFile ("settings_"++T.unpack serverid++".json") (encodeToLazyText settings)
+saveServerSettings serverid settings = TLIO.writeFile (getServerSettingsPath serverid) (encodeToLazyText settings)
 
 loadServerSettings :: T.Text -> IO Settings
 loadServerSettings serverid = do
