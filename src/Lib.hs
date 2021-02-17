@@ -229,7 +229,10 @@ dealAttack env damageam player = player{ imData = let d = imData player in d {to
 
 dealHeal env healam player = player{ hp = min (hpStart $ settings env) (hp player + healam)}
 dealBuff env t buffam player = player{ buff = (t, buffam, time env) : buff player }
-setLog spell target player = player{ spellLog = spell : spellLog player, targetLog = target : targetLog player}
+
+appendIfDifferent e (x:xs) = if e == x then x:xs else e:x:xs
+appendIfDifferent e [] = [e]
+setLog spell target player = player{ spellLog = appendIfDifferent spell (spellLog player), targetLog = appendIfDifferent target (targetLog player)}
                                      
 tryCast :: MagicEnv -> SpellData -> T.Text -> T.Text -> Map T.Text Player -> Maybe (Map T.Text Player, [(T.Text , SpellResult)])
 tryCast env spell sourceid targetid players = do
