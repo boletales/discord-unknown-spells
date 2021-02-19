@@ -192,7 +192,7 @@ defaultPow :: Text -> Double
 defaultPow = (\i -> (fromIntegral i / (2^32) - 0.5) *2) . power . flip getSpell ""
 
 calcBuff :: MagicEnv -> SpellData -> p1 -> p2 -> Double
-calcBuff env spell source target = intToPowDouble (buffPow $ settings env) ((\p -> p `div` 2 + 2^30 * (p `div` 2^31)) $ power spell)
+calcBuff env spell source target = intToPowDouble (buffPow $ settings env) ((\p -> p `div` 2 + 2^30 * 3 * (p `div` 2^31)) $ power spell)
 
 calcBuffTotal :: MagicEnv -> BuffType -> Player -> Double
 calcBuffTotal env buffType player = 
