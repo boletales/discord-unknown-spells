@@ -188,8 +188,13 @@ getSpell str p = flip execHashReader (TE.encodeUtf8 $ p `T.append` str) $ do
 intToPowDouble :: Double -> Int -> Double
 intToPowDouble mag int = mag ** (fromIntegral int / (2^32) - 0.5)
 
+defaultPow :: Text -> Double
+defaultPow = (\i -> (fromIntegral i / (2^32) - 0.5) *2) . power . flip getSpell ""
+
+calcBuff :: MagicEnv -> SpellData -> p1 -> p2 -> Double
 calcBuff env spell source target = intToPowDouble (buffPow $ settings env) (power spell)
 
+calcBuffTotal :: MagicEnv -> BuffType -> Player -> Double
 calcBuffTotal env buffType player = 
     (L.product
         $ L.map    (\(bt, po, pt, ag, ls) -> po ** (1- ag/ls) ) 
@@ -204,18 +209,21 @@ calcDamage env spell source target =
         baseDamage = (damageMag $ settings env) * intToPowDouble (damagePow $ settings env) (power spell)
     in double2Int $ baseDamage * saBuff / tdBuff
 
+calcHeal :: MagicEnv -> SpellData -> Player -> Player -> Int
 calcHeal env spell source target = 
     let saBuff = calcBuffTotal env StAttack  source
         tdBuff = calcBuffTotal env StDefense target
         baseDamage = (damageMag $ settings env) * intToPowDouble (damagePow $ settings env) (power spell)
     in double2Int $ baseDamage * saBuff
 
-calcCost spell ss = double2Int $ intToPowDouble 6 (power spell) * 
-                                case spelltype spell of
-                                    Attack -> costMag ss * 1.0
-                                    Heal   -> costMag ss * 1.0
-                                    Buff t -> costMag ss * 1.0
+calcCost :: SpellData -> Settings -> Int
+calcCost spell ss = double2Int $
+    case spelltype spell of
+        Attack -> costMag ss * 1.0 * (intToPowDouble 6 $ power spell)
+        Heal   -> costMag ss * 1.0 * (intToPowDouble 6 $ power spell)
+        Buff t -> costMag ss * 1.0 * (intToPowDouble 6 $ convertBuffPower $ power spell)
 
+convertBuffPower i = abs (i - 2^31) * 2
 
 castSideEff env cost player = player{ imData = let d = imData player in d{totalCast = totalCast d + 1, totalMana = totalMana d + cost}}
 
